@@ -62,7 +62,9 @@ const getZkTransactions = async function (address, tx, index) {
                 for (let i = index; i < data.result.list.length; i++) {
                     // console.log(data.result.list[i])
                     let txInfo = await parseTxInfo(data.result.list[i], 'zksync')
-                    await finalInfo.writeRecords([txInfo])
+                    if (txInfo) {
+                        await finalInfo.writeRecords([txInfo])
+                    }
                 }
                 return data
             })
@@ -76,6 +78,31 @@ const getZkTransactions = async function (address, tx, index) {
             });
     })
 
+}
+
+const getEthTransactions = async function (address, num) {
+    console.log('calling getEthTransactions with num: ', num)
+    const result = await etherscan.schedule(async () => {
+        await fetch(`https://api.etherscan.io/api` +
+            `?module=account` +
+            `&action=txlist` +
+            `&address=${address}` +
+            `&startblock=0` +
+            `&endblock=99999999` +
+            `&page=${num}` +
+            `&offset=100` +
+            `&sort=asc` +
+            `&apikey=${etherscanApiKey}`)
+            .then(res => res.json())
+            .then(async data => {
+                for (let i = 0; i < data.result.length; i++) {
+                    let txInfo = await parseTxInfo(data.result[i], 'ethereum txs')
+                    if (txInfo) {
+                        await finalInfo.writeRecords([txInfo])
+                    }
+                }
+            })
+    })
 }
 
 async function parseTxInfo(tx, networkSymbol) {
@@ -114,7 +141,7 @@ async function parseTxInfo(tx, networkSymbol) {
         }
     } else if (networkSymbol == 'ethereum txs') {
         if (tx.to === donationAddress) {
-            console.log(tx)
+            console.log('parsing info: ', tx)
             let timestamp = Number(tx.timeStamp) * 1000
             let fromAddress = tx.from
             let token = 'ETH'
@@ -214,32 +241,8 @@ const findPrice = async function (tokenId, date) {
     }
 }
 
-getZkTransactions(donationAddress, 'latest', 0, 0)
-
-
-const getEthTransactions = async function (address, num) {
-    console.log('calling getEthTransactions with num: ', num)
-    const result = await etherscan.schedule(async () => {
-        await fetch(`https://api.etherscan.io/api` +
-            `?module=account` +
-            `&action=txlist` +
-            `&address=${address}` +
-            `&startblock=0` +
-            `&endblock=99999999` +
-            `&page=${num}` +
-            `&offset=100` +
-            `&sort=asc` +
-            `&apikey=${etherscanApiKey}`)
-            .then(res => res.json())
-            .then(async data => {
-                for (let i = 0; i < data.result.length; i++) {
-                    let txInfo = await parseTxInfo(data.result[i], 'ethereum txs')
-                    // await finalInfo.writeRecords([txInfo])
-                }
-            })
-    })
-}
-
+// getZkTransactions(donationAddress, 'latest', 0, 0)
+getEthTransactions(donationAddress, 1)
 
 let exampleTx = {
     txHash: '0xf98789db93c7ab0e124ed906ff4bbbd718ca7b5a87208df0972eb0bd2e69b50e',
