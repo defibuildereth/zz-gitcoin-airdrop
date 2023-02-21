@@ -105,6 +105,33 @@ const getEthTransactions = async function (address, num) {
     })
 }
 
+const getMaticTransactions = async function (address, num) {
+    console.log('calling getMaticTransactions with num: ', num)
+    const result = await polygonscan.schedule(async () => {
+        await fetch(
+            `https://api.polygonscan.com/api` +
+            `?module=account` +
+            `&action=txlist` +
+            `&address=${address}` +
+            `&startblock=0` +
+            `&endblock=99999999` +
+            `&page=1` +
+            `&offset=10000` +
+            `&sort=asc` +
+            `&apikey=${polygonscanApiKey}`
+        )
+            .then(res => res.json())
+            .then(async data => {
+                for (let i = 0; i < data.result.length; i++) {
+                    let txInfo = await parseTxInfo(data.result[i], 'polygon txs')
+                    if (txInfo) {
+                        await finalInfo.writeRecords([txInfo])
+                    }
+                }
+            })
+    })
+}
+
 const getEthTokens = async function (address) {
     console.log('calling getEthTokens')
     const result = await etherscan.schedule(async () => {
@@ -142,7 +169,7 @@ async function parseTxInfo(tx, networkSymbol) {
             let fromAddress = tx.op.from;
             let token = await getZkTokenInfo(tx.op.token) // store locally
             let tokenDecimals = token.decimals;
-            let tokenAmount = (tx.op.amount * 10 ** - tokenDecimals).toFixed(4);
+            let tokenAmount = (tx.op.amount * 10 ** - tokenDecimals).toFixed(6);
             let price;
             if (stables.includes(token.symbol.toLowerCase())) {
                 price = 1
@@ -152,7 +179,7 @@ async function parseTxInfo(tx, networkSymbol) {
                 price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
             }
             if (price) {
-                let usdValue = price * tokenAmount;
+                let usdValue = (price * tokenAmount).toFixed(6);
                 let network = networkSymbol
                 let date = new Date(tx.createdAt)
                 let timestamp = date.getTime();
@@ -179,12 +206,12 @@ async function parseTxInfo(tx, networkSymbol) {
             let coingeckoDate = timestampToDate(Number(timestamp))
             if (networkSymbol === 'ethereum txs') {
                 token = 'ETH'
-                tokenAmount = Number(tx.value * 10 ** -18).toFixed(4)
+                tokenAmount = Number(tx.value * 10 ** -18).toFixed(6)
                 coingeckoDate = timestampToDate(Number(timestamp))
                 price = await findPrice('ethereum', coingeckoDate)
             } else if (networkSymbol == 'ethereum tokens') {
                 token = tx.tokenSymbol
-                tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(4)
+                tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(6)
                 if (stables.includes(token.toLowerCase())) {
                     price = 1
                 } else {
@@ -193,7 +220,7 @@ async function parseTxInfo(tx, networkSymbol) {
                 }
             }
             if (price) {
-                let usdValue = price * tokenAmount;
+                let usdValue = (price * tokenAmount).toFixed(6);
                 let network = 'ethereum'
                 let txHash = tx.hash
                 return {
@@ -205,8 +232,50 @@ async function parseTxInfo(tx, networkSymbol) {
                     network: network,
                     txHash: txHash,
                 }
+            } else {
+                console.log('error getting price', tx)
             }
         }
+    } else if (networkSymbol.slice(0, 7) === 'polygon') {
+        if (tx.to === donationAddress) {
+            let timestamp = Number(tx.timeStamp) * 1000
+            let fromAddress = tx.from
+            let tokenAmount, price, token;
+            let coingeckoDate = timestampToDate(Number(timestamp))
+            if (networkSymbol === 'polygon txs') {
+                token = 'MATIC'
+                tokenAmount = Number(tx.value * 10 ** -18).toFixed(6)
+                coingeckoDate = timestampToDate(Number(timestamp))
+                price = await findPrice('matic-network', coingeckoDate)
+            } else if (networkSymbol == 'polygon tokens') {
+                token = tx.tokenSymbol
+                tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(6)
+                if (stables.includes(token.toLowerCase())) {
+                    price = 1
+                } else {
+                    let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+                    price = await findPrice(coingeckoSymbol, coingeckoDate)
+                }
+            }
+            if (price) {
+                let usdValue = (price * tokenAmount).toFixed(6);
+                let network = 'polygon'
+                let txHash = tx.hash
+                return {
+                    timestamp: timestamp,
+                    from: fromAddress,
+                    token: token,
+                    tokenAmount: tokenAmount,
+                    usdValue: usdValue,
+                    network: network,
+                    txHash: txHash,
+                }
+            } else {
+                console.log('error getting price', tx)
+            }
+        }
+    } else {
+        console.log(`network symbol not recognised: ${networkSymbol}`)
     }
 }
 
@@ -385,6 +454,6 @@ let exampleEthTokens = {
     confirmations: '1664568'
 }
 
-
-console.log(await parseTxInfo(exampleEthTokens, 'ethereum tokens'))
-console.log(await parseTxInfo(exampleEthTx, 'ethereum txs'))
+// console.log(await parseTxInfo(exampleEthTokens, 'ethereum tokens'))
+// console.log(await parseTxInfo(exampleEthTx, 'ethereum txs'))
+getMaticTransactions(donationAddress, 1)
