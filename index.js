@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import { createObjectCsvWriter } from "csv-writer";
 import Bottleneck from "bottleneck";
+import * as fs from "fs";
 
 let startTime = Date.now();
 
@@ -20,6 +21,8 @@ const finalInfo = createObjectCsvWriter({
 dotenv.config();
 
 let tokens = [];
+const tokensFile = 'token-api-results.json';
+const pricesFile = 'prices-api-results.json';
 let prices = [];
 let stables = ['usdc', 'usdt', 'dai']
 
@@ -197,32 +200,35 @@ async function parseTxInfo(tx, networkSymbol) {
             let txHash = tx.txHash;
             let fromAddress = tx.op.from;
             let token = await getZkTokenInfo(tx.op.token) // store locally
-            let tokenDecimals = token.decimals;
-            let tokenAmount = (tx.op.amount * 10 ** - tokenDecimals).toFixed(6);
-            let price;
-            if (stables.includes(token.symbol.toLowerCase())) {
-                price = 1
-            } else {
-                let coingeckoDate = formatZkDate(tx.createdAt)
-                let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
-                price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
-            }
-            if (price) {
-                let usdValue = (price * tokenAmount).toFixed(6);
-                let network = networkSymbol
-                let date = new Date(tx.createdAt)
-                let timestamp = date.getTime();
+            if (token) {
+                let tokenDecimals = token.decimals;
+                let tokenAmount = (tx.op.amount * 10 ** - tokenDecimals).toFixed(6);
+                let price;
+                if (stables.includes(token.symbol.toLowerCase())) {
+                    price = 1
+                } else {
+                    let coingeckoDate = formatZkDate(tx.createdAt)
+                    let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+                    price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
+                }
+                if (price) {
+                    let usdValue = (price * tokenAmount).toFixed(6);
+                    let network = networkSymbol
+                    let date = new Date(tx.createdAt)
+                    let timestamp = date.getTime();
 
-                return {
-                    timestamp: timestamp,
-                    from: fromAddress,
-                    token: token.symbol,
-                    tokenAmount: tokenAmount,
-                    usdValue: usdValue,
-                    network: network,
-                    txHash: txHash,
+                    return {
+                        timestamp: timestamp,
+                        from: fromAddress,
+                        token: token.symbol,
+                        tokenAmount: tokenAmount,
+                        usdValue: usdValue,
+                        network: network,
+                        txHash: txHash,
+                    }
                 }
             }
+
         } else {
             console.log('outgoing/ non-finalized')
         }
@@ -334,27 +340,60 @@ function getCoingeckoSymbol(symbol) {
 }
 
 async function getZkTokenInfo(int) {
-    if (tokens[int]) {
-        return tokens[int]
-    } else {
-        if (int) {
-            let decimals, symbol;
-            console.log('calling api', int)
-            await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
-                .then(res => res.json())
-                .then(data => {
-                    symbol = data.result.symbol
-                    decimals = data.result.decimals
-                    return { symbol: symbol, decimals: decimals, coingecko: coingecko }
-                })
-                .then(info => {
-                    tokens[int] = info
-                })
-            return { symbol: symbol, decimals: decimals }
-        }
+    let result;
 
+    // Check if file exists and contains result for this int value
+    if (fs.existsSync(tokensFile)) {
+        const data = fs.readFileSync(tokensFile);
+        console.log(data)
+        const jsonData = JSON.parse(data);
+        console.log('file data: ', jsonData)
+
+        if (jsonData[int]) {
+            console.log('Result retrieved from file:', jsonData[int]);
+            return jsonData[int];
+        }
     }
+
+    // If result not found in file, make API call
+    console.log('API call for int:', int);
+    await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.result) {
+                result = data.result;
+                // Save result to file
+                const jsonData = { ...JSON.parse(fs.readFileSync(tokensFile)), [int]: result };
+                fs.writeFileSync(tokensFile, JSON.stringify(jsonData));
+                console.log('Result saved to file:', result);
+            }
+        })
+        .catch(err => console.error(err));
+
+    return result;
 }
+
+// async function getZkTokenInfo(int) {
+//     if (tokens[int]) {
+//         return tokens[int]
+//     } else {
+//         let decimals, symbol;
+//         console.log('calling api', int)
+//         await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
+//             .then(res => res.json())
+//             .then(data => {
+//                 if (data.result) {
+//                     symbol = data.result.symbol
+//                     decimals = data.result.decimals
+//                     return { symbol: symbol, decimals: decimals }
+//                 }
+//             })
+//             .then(info => {
+//                 tokens[int] = info
+//             })
+//         return { symbol: symbol, decimals: decimals }
+//     }
+// }
 
 const findPrice = async function (tokenId, date) {
     if (stables.includes(tokenId)) {
