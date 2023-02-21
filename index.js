@@ -24,9 +24,6 @@ let prices = [];
 let stables = ['usdc', 'usdt', 'dai']
 
 const coingecko = new Map();
-// coingecko.set('usdc', 'usd-coin');
-// coingecko.set('usdt', 'tether');
-// coingecko.set('dai', 'dai');
 coingecko.set('wbtc', 'wrapped-bitcoin');
 coingecko.set('eth', 'ethereum');
 
@@ -55,55 +52,64 @@ const coingeckoApi = new Bottleneck({
 
 let donationAddress = '0x9b67d3067fa606be28e56c1ab184725c07b7b221';
 
-const getTransactions = async function (address, tx, index, number) {
+const getZkTransactions = async function (address, tx, index) {
 
-    console.log('calling getTransactions with tx: ', tx)
-    await fetch(`https://api.zksync.io/api/v0.2/accounts/${address}/transactions?from=${tx}&limit=100&direction=older`)
-        .then((res) => res.json())
-        .then(async data => {
-            for (let i = index; i < data.result.list.length; i++) {
-                // console.log(data.result.list[i])
-                let txInfo = await parseZkSyncTxInfo(data.result.list[i])
-                await finalInfo.writeRecords([txInfo])
-            }
-            return data
-        })
-        .then((data) => {
-            // console.log('...Done');
-            if (data.result.list.length > 99) {
-                getTransactions(address, data.result.list[99].txHash, 1, number + 100)
-            }
-        });
+    console.log('calling getZkTransactions with tx: ', tx)
+    const result = await zkscan.schedule(async () => {
+        await fetch(`https://api.zksync.io/api/v0.2/accounts/${address}/transactions?from=${tx}&limit=100&direction=older`)
+            .then((res) => res.json())
+            .then(async data => {
+                for (let i = index; i < data.result.list.length; i++) {
+                    // console.log(data.result.list[i])
+                    let txInfo = await parseZkSyncTxInfo(data.result.list[i])
+                    await finalInfo.writeRecords([txInfo])
+                }
+                return data
+            })
+            .then((data) => {
+                if (data.result.list.length > 99) {
+                    getZkTransactions(address, data.result.list[99].txHash, 1)
+                }
+                else {
+                    console.log('zk txs done')
+                }
+            });
+    })
+
 }
 
 async function parseZkSyncTxInfo(tx) {
-    // console.log(tx)
-    let txHash = tx.txHash;
-    let fromAddress = tx.op.from;
-    let token = await getZkTokenInfo(tx.op.token) // store locally
-    let tokenDecimals = token.decimals;
-    let tokenAmount = tx.op.amount * 10 ** - tokenDecimals;
-    let price;
-    if (stables.includes(token.symbol.toLowerCase())) {
-        price = 1
-    } else {
-        let coingeckoDate = formatDate(tx.createdAt)
-        let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
-        price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
-    }
-    let usdValue = price * tokenAmount;
-    let network = 'zkSync'
-    let date = new Date(tx.createdAt)
-    let timestamp = date.getTime();
+    if (tx.op.to === donationAddress && tx.status === 'finalized') {
+        // console.log(tx)
+        let txHash = tx.txHash;
+        let fromAddress = tx.op.from;
+        let token = await getZkTokenInfo(tx.op.token) // store locally
+        let tokenDecimals = token.decimals;
+        let tokenAmount = tx.op.amount * 10 ** - tokenDecimals;
+        let price;
+        if (stables.includes(token.symbol.toLowerCase())) {
+            price = 1
+        } else {
+            let coingeckoDate = formatDate(tx.createdAt)
+            let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+            price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
+        }
+        let usdValue = price * tokenAmount;
+        let network = 'zkSync'
+        let date = new Date(tx.createdAt)
+        let timestamp = date.getTime();
 
-    return {
-        timestamp: timestamp,
-        from: fromAddress,
-        token: token.symbol,
-        tokenAmount: tokenAmount,
-        usdValue: usdValue,
-        network: network,
-        txHash: txHash,
+        return {
+            timestamp: timestamp,
+            from: fromAddress,
+            token: token.symbol,
+            tokenAmount: tokenAmount,
+            usdValue: usdValue,
+            network: network,
+            txHash: txHash,
+        }
+    } else {
+        console.log('outgoing/ non-finalized')
     }
 }
 
@@ -129,7 +135,8 @@ async function getZkTokenInfo(int) {
     } else {
         let decimals, symbol;
         console.log('calling api', int)
-        await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
+        const result = await zkscan.schedule(async () => {
+            await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
             .then(res => res.json())
             .then(data => {
                 symbol = data.result.symbol
@@ -140,6 +147,7 @@ async function getZkTokenInfo(int) {
                 tokens[int] = info
             })
         return { symbol: symbol, decimals: decimals }
+        })
     }
 }
 
@@ -173,7 +181,13 @@ const findPrice = async function (tokenId, date) {
     }
 }
 
-getTransactions(donationAddress, 'latest', 0, 0)
+getZkTransactions(donationAddress, 'latest', 0, 0)
+
+
+const getEthTransactions = async function (address, tx, index) {
+
+}
+
 
 let exampleTx = {
     txHash: '0xf98789db93c7ab0e124ed906ff4bbbd718ca7b5a87208df0972eb0bd2e69b50e',
