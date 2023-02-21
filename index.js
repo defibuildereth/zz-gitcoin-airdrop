@@ -26,6 +26,7 @@ let stables = ['usdc', 'usdt', 'dai']
 const coingecko = new Map();
 coingecko.set('wbtc', 'wrapped-bitcoin');
 coingecko.set('eth', 'ethereum');
+coingecko.set('weth', 'weth')
 
 let polygonscanApiKey = process.env.POLYGONSCAN;
 let etherscanApiKey = process.env.ETHERSCAN;
@@ -132,6 +133,33 @@ const getMaticTransactions = async function (address, num) {
     })
 }
 
+const getMaticTokens = async function (address, num) {
+    console.log('calling getMaticTokens', num)
+    const result = await polygonscan.schedule(async () => {
+        await fetch(
+            `https://api.polygonscan.com/api` +
+            `?module=account` +
+            `&action=tokentx` +
+            `&address=${address}` +
+            `&startblock=0` +
+            `&endblock=99999999` +
+            `&page=1` +
+            `&offset=1000` +
+            `&sort=asc` +
+            `&apikey=${polygonscanApiKey}`
+        )
+            .then(res => res.json())
+            .then(async data => {
+                for (let i = 0; i < data.result.length; i++) {
+                    let txInfo = await parseTxInfo(data.result[i], 'polygon tokens')
+                    if (txInfo) {
+                        await finalInfo.writeRecords([txInfo])
+                    }
+                }
+            })
+    })
+}
+
 const getEthTokens = async function (address) {
     console.log('calling getEthTokens')
     const result = await etherscan.schedule(async () => {
@@ -162,6 +190,7 @@ const getEthTokens = async function (address) {
 }
 
 async function parseTxInfo(tx, networkSymbol) {
+    console.log(tx)
     if (networkSymbol == 'zksync') {
         if (tx.op.to === donationAddress && tx.status === 'finalized') {
             // console.log(tx)
@@ -215,7 +244,7 @@ async function parseTxInfo(tx, networkSymbol) {
                 if (stables.includes(token.toLowerCase())) {
                     price = 1
                 } else {
-                    let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+                    let coingeckoSymbol = getCoingeckoSymbol(token.toLowerCase());
                     price = await findPrice(coingeckoSymbol, coingeckoDate)
                 }
             }
@@ -236,7 +265,8 @@ async function parseTxInfo(tx, networkSymbol) {
                 console.log('error getting price', tx)
             }
         }
-    } else if (networkSymbol.slice(0, 7) === 'polygon') {
+    }
+    else if (networkSymbol.slice(0, 7) === 'polygon') {
         if (tx.to === donationAddress) {
             let timestamp = Number(tx.timeStamp) * 1000
             let fromAddress = tx.from
@@ -253,7 +283,7 @@ async function parseTxInfo(tx, networkSymbol) {
                 if (stables.includes(token.toLowerCase())) {
                     price = 1
                 } else {
-                    let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+                    let coingeckoSymbol = getCoingeckoSymbol(token.toLowerCase());
                     price = await findPrice(coingeckoSymbol, coingeckoDate)
                 }
             }
@@ -356,6 +386,8 @@ const findPrice = async function (tokenId, date) {
 // getZkTransactions(donationAddress, 'latest', 0, 0)
 // getEthTransactions(donationAddress, 1)
 // getEthTokens(donationAddress)
+// getMaticTransactions(donationAddress, 1)
+getMaticTokens(donationAddress, 1)
 
 let exampleTx = {
     txHash: '0xf98789db93c7ab0e124ed906ff4bbbd718ca7b5a87208df0972eb0bd2e69b50e',
@@ -454,6 +486,27 @@ let exampleEthTokens = {
     confirmations: '1664568'
 }
 
+let exampleMaticTokens = {
+    blockNumber: '22576673',
+    timeStamp: '1639625423',
+    hash: '0xd9cd1466f1d61c90af5becba46f5e8db9d26d33db5cf9662c290fbef83a68534',
+    nonce: '5',
+    blockHash: '0x5c28caf27fd98bf207163c5248f9145b7040294eb065b73b54e42fb0d54fbd1a',
+    from: '0xe76539ea9ec18cdf9d794f07f0fe9462257b07a9',
+    contractAddress: '0x8f3cf7ad23cd3cadbd9735aff958023239c6a063',
+    to: '0x9b67d3067fa606be28e56c1ab184725c07b7b221',
+    value: '1200000000000000000',
+    tokenName: '(PoS) Dai Stablecoin',
+    tokenSymbol: 'DAI',
+    tokenDecimal: '18',
+    transactionIndex: '43',
+    gas: '990000',
+    gasPrice: '30000000000',
+    gasUsed: '860510',
+    cumulativeGasUsed: '6693919',
+    input: 'deprecated',
+    confirmations: '16979082'
+}
+
 // console.log(await parseTxInfo(exampleEthTokens, 'ethereum tokens'))
-// console.log(await parseTxInfo(exampleEthTx, 'ethereum txs'))
-getMaticTransactions(donationAddress, 1)
+console.log(await parseTxInfo(exampleMaticTokens, 'polygon tokens'))
