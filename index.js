@@ -105,6 +105,35 @@ const getEthTransactions = async function (address, num) {
     })
 }
 
+const getEthTokens = async function (address) {
+    console.log('calling getEthTokens')
+    const result = await etherscan.schedule(async () => {
+        await fetch(
+            `https://api.etherscan.io/api` +
+            `?module=account` +
+            `&action=tokentx` +
+            `&address=${address}` +
+            `&page=1` +
+            `&offset=1000` +
+            `&startblock=0` +
+            `&endblock=99999999` +
+            `&sort=asc` +
+            `&apikey=${etherscanApiKey}`
+        )
+            .then(res => res.json())
+            .then(async data => {
+                console.log(data.result.length)
+                for (let i = 0; i < data.result.length; i++) {
+                    console.log(data.result[i])
+                    let txInfo = await parseTxInfo(data.result[i], 'ethereum tokens')
+                    if (txInfo) {
+                        await finalInfo.writeRecords([txInfo])
+                    }
+                }
+            })
+    })
+}
+
 async function parseTxInfo(tx, networkSymbol) {
     if (networkSymbol == 'zksync') {
         if (tx.op.to === donationAddress && tx.status === 'finalized') {
@@ -113,7 +142,7 @@ async function parseTxInfo(tx, networkSymbol) {
             let fromAddress = tx.op.from;
             let token = await getZkTokenInfo(tx.op.token) // store locally
             let tokenDecimals = token.decimals;
-            let tokenAmount = tx.op.amount * 10 ** - tokenDecimals;
+            let tokenAmount = (tx.op.amount * 10 ** - tokenDecimals).toFixed(4);
             let price;
             if (stables.includes(token.symbol.toLowerCase())) {
                 price = 1
@@ -122,44 +151,81 @@ async function parseTxInfo(tx, networkSymbol) {
                 let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
                 price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
             }
-            let usdValue = price * tokenAmount;
-            let network = networkSymbol
-            let date = new Date(tx.createdAt)
-            let timestamp = date.getTime();
+            if (price) {
+                let usdValue = price * tokenAmount;
+                let network = networkSymbol
+                let date = new Date(tx.createdAt)
+                let timestamp = date.getTime();
 
-            return {
-                timestamp: timestamp,
-                from: fromAddress,
-                token: token.symbol,
-                tokenAmount: tokenAmount,
-                usdValue: usdValue,
-                network: network,
-                txHash: txHash,
+                return {
+                    timestamp: timestamp,
+                    from: fromAddress,
+                    token: token.symbol,
+                    tokenAmount: tokenAmount,
+                    usdValue: usdValue,
+                    network: network,
+                    txHash: txHash,
+                }
             }
         } else {
             console.log('outgoing/ non-finalized')
         }
     } else if (networkSymbol == 'ethereum txs') {
         if (tx.to === donationAddress) {
-            console.log('parsing info: ', tx)
+            // console.log('parsing info: ', tx)
             let timestamp = Number(tx.timeStamp) * 1000
             let fromAddress = tx.from
             let token = 'ETH'
-            let tokenAmount = Number(tx.value * 10 ** -18)
+            let tokenAmount = Number(tx.value * 10 ** -18).toFixed(4)
             let coingeckoDate = timestampToDate(Number(timestamp))
             let price = await findPrice('ethereum', coingeckoDate)
-            let usdValue = price * tokenAmount;
-            let network = 'ethereum'
-            let txHash = tx.hash
-            return {
-                timestamp: timestamp,
-                from: fromAddress,
-                token: token,
-                tokenAmount: tokenAmount,
-                usdValue: usdValue,
-                network: network,
-                txHash: txHash,
+            if (price) {
+                let usdValue = price * tokenAmount;
+                let network = 'ethereum'
+                let txHash = tx.hash
+                return {
+                    timestamp: timestamp,
+                    from: fromAddress,
+                    token: token,
+                    tokenAmount: tokenAmount,
+                    usdValue: usdValue,
+                    network: network,
+                    txHash: txHash,
+                }
             }
+        } else {
+            console.log('not an incoming')
+        }
+    } else if (networkSymbol == 'ethereum tokens') {
+        if (tx.to === donationAddress) {
+            console.log('parsing info: ', tx)
+            let timestamp = Number(tx.timeStamp) * 1000
+            let fromAddress = tx.from
+            let token = tx.tokenSymbol
+            let tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(4)
+            let price;
+            if (stables.includes(token.toLowerCase())) {
+                price = 1
+            } else {
+                let coingeckoDate = timestampToDate(Number(timestamp))
+                let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+                price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
+            }
+            if (price) {
+                let usdValue = price * tokenAmount;
+                let network = 'ethereum'
+                let txHash = tx.hash
+                return {
+                    timestamp: timestamp,
+                    from: fromAddress,
+                    token: token,
+                    tokenAmount: tokenAmount,
+                    usdValue: usdValue,
+                    network: network,
+                    txHash: txHash,
+                }
+            }
+
         } else {
             console.log('not an incoming')
         }
@@ -242,7 +308,8 @@ const findPrice = async function (tokenId, date) {
 }
 
 // getZkTransactions(donationAddress, 'latest', 0, 0)
-getEthTransactions(donationAddress, 1)
+// getEthTransactions(donationAddress, 1)
+getEthTokens(donationAddress)
 
 let exampleTx = {
     txHash: '0xf98789db93c7ab0e124ed906ff4bbbd718ca7b5a87208df0972eb0bd2e69b50e',
@@ -319,5 +386,27 @@ let exampleEthTx = {
     functionName: ''
 }
 
+let exampleEthTokens = {
+    blockNumber: '15013014',
+    timeStamp: '1655988474',
+    hash: '0xfb7bb9a29aef329785a9639a236c538aa27b64ddecc6185c11a80c949eb74325',
+    nonce: '241',
+    blockHash: '0x0d18fa303aef0c5ff3dc2959d0563abdcbab8198a8048b4d9e33b90bdbc9d3a2',
+    from: '0x00622116402f303f22d38f3ec202774f183f6468',
+    contractAddress: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    to: '0x9b67d3067fa606be28e56c1ab184725c07b7b221',
+    value: '10000000',
+    tokenName: 'USD Coin',
+    tokenSymbol: 'USDC',
+    tokenDecimal: '6',
+    transactionIndex: '238',
+    gas: '700000',
+    gasPrice: '33314312000',
+    gasUsed: '208738',
+    cumulativeGasUsed: '23652659',
+    input: 'deprecated',
+    confirmations: '1664568'
+}
 
-// console.log(await parseTxInfo(exampleEthTx, 'ethereum txs'))
+
+// console.log(await parseTxInfo(exampleEthTokens, 'ethereum tokens'))
