@@ -26,7 +26,7 @@ let stables = ['usdc', 'usdt', 'dai']
 const coingecko = new Map();
 coingecko.set('wbtc', 'wrapped-bitcoin');
 coingecko.set('eth', 'ethereum');
-coingecko.set('weth', 'weth')
+coingecko.set('weth', 'ethereum')
 
 let polygonscanApiKey = process.env.POLYGONSCAN;
 let etherscanApiKey = process.env.ETHERSCAN;
@@ -144,12 +144,13 @@ const getMaticTokens = async function (address, num) {
             `&startblock=0` +
             `&endblock=99999999` +
             `&page=1` +
-            `&offset=1000` +
+            `&offset=10000` +
             `&sort=asc` +
             `&apikey=${polygonscanApiKey}`
         )
             .then(res => res.json())
             .then(async data => {
+                console.log(data.result.length)
                 for (let i = 0; i < data.result.length; i++) {
                     let txInfo = await parseTxInfo(data.result[i], 'polygon tokens')
                     if (txInfo) {
@@ -383,10 +384,10 @@ const findPrice = async function (tokenId, date) {
     }
 }
 
-// getZkTransactions(donationAddress, 'latest', 0, 0)
-// getEthTransactions(donationAddress, 1)
-// getEthTokens(donationAddress)
-// getMaticTransactions(donationAddress, 1)
+getZkTransactions(donationAddress, 'latest', 0, 0)
+getEthTransactions(donationAddress, 1)
+getEthTokens(donationAddress)
+getMaticTransactions(donationAddress, 1)
 getMaticTokens(donationAddress, 1)
 
 let exampleTx = {
@@ -509,4 +510,4 @@ let exampleMaticTokens = {
 }
 
 // console.log(await parseTxInfo(exampleEthTokens, 'ethereum tokens'))
-console.log(await parseTxInfo(exampleMaticTokens, 'polygon tokens'))
+// console.log(await parseTxInfo(exampleMaticTokens, 'polygon tokens'))
