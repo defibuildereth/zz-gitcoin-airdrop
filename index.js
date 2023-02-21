@@ -61,7 +61,7 @@ const getZkTransactions = async function (address, tx, index) {
             .then(async data => {
                 for (let i = index; i < data.result.list.length; i++) {
                     // console.log(data.result.list[i])
-                    let txInfo = await parseZkSyncTxInfo(data.result.list[i])
+                    let txInfo = await parseTxInfo(data.result.list[i], 'zksync')
                     await finalInfo.writeRecords([txInfo])
                 }
                 return data
@@ -78,42 +78,77 @@ const getZkTransactions = async function (address, tx, index) {
 
 }
 
-async function parseZkSyncTxInfo(tx) {
-    if (tx.op.to === donationAddress && tx.status === 'finalized') {
-        // console.log(tx)
-        let txHash = tx.txHash;
-        let fromAddress = tx.op.from;
-        let token = await getZkTokenInfo(tx.op.token) // store locally
-        let tokenDecimals = token.decimals;
-        let tokenAmount = tx.op.amount * 10 ** - tokenDecimals;
-        let price;
-        if (stables.includes(token.symbol.toLowerCase())) {
-            price = 1
-        } else {
-            let coingeckoDate = formatDate(tx.createdAt)
-            let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
-            price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
-        }
-        let usdValue = price * tokenAmount;
-        let network = 'zkSync'
-        let date = new Date(tx.createdAt)
-        let timestamp = date.getTime();
+async function parseTxInfo(tx, networkSymbol) {
+    if (networkSymbol == 'zksync') {
+        if (tx.op.to === donationAddress && tx.status === 'finalized') {
+            // console.log(tx)
+            let txHash = tx.txHash;
+            let fromAddress = tx.op.from;
+            let token = await getZkTokenInfo(tx.op.token) // store locally
+            let tokenDecimals = token.decimals;
+            let tokenAmount = tx.op.amount * 10 ** - tokenDecimals;
+            let price;
+            if (stables.includes(token.symbol.toLowerCase())) {
+                price = 1
+            } else {
+                let coingeckoDate = formatZkDate(tx.createdAt)
+                let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+                price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
+            }
+            let usdValue = price * tokenAmount;
+            let network = networkSymbol
+            let date = new Date(tx.createdAt)
+            let timestamp = date.getTime();
 
-        return {
-            timestamp: timestamp,
-            from: fromAddress,
-            token: token.symbol,
-            tokenAmount: tokenAmount,
-            usdValue: usdValue,
-            network: network,
-            txHash: txHash,
+            return {
+                timestamp: timestamp,
+                from: fromAddress,
+                token: token.symbol,
+                tokenAmount: tokenAmount,
+                usdValue: usdValue,
+                network: network,
+                txHash: txHash,
+            }
+        } else {
+            console.log('outgoing/ non-finalized')
         }
-    } else {
-        console.log('outgoing/ non-finalized')
+    } else if (networkSymbol == 'ethereum txs') {
+        if (tx.to === donationAddress) {
+            console.log(tx)
+            let timestamp = Number(tx.timeStamp) * 1000
+            let fromAddress = tx.from
+            let token = 'ETH'
+            let tokenAmount = Number(tx.value * 10 ** -18)
+            let coingeckoDate = timestampToDate(Number(timestamp))
+            let price = await findPrice('ethereum', coingeckoDate)
+            let usdValue = price * tokenAmount;
+            let network = 'ethereum'
+            let txHash = tx.hash
+            return {
+                timestamp: timestamp,
+                from: fromAddress,
+                token: token,
+                tokenAmount: tokenAmount,
+                usdValue: usdValue,
+                network: network,
+                txHash: txHash,
+            }
+        } else {
+            console.log('not an incoming')
+        }
     }
+
 }
 
-function formatDate(dateString) {
+function timestampToDate(timestamp) {
+    const date = new Date(timestamp);
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+}
+
+function formatZkDate(dateString) {
     const date = new Date(dateString);
     const day = date.getUTCDate().toString().padStart(2, '0');
     const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
@@ -182,8 +217,27 @@ const findPrice = async function (tokenId, date) {
 getZkTransactions(donationAddress, 'latest', 0, 0)
 
 
-const getEthTransactions = async function (address, tx, index) {
-
+const getEthTransactions = async function (address, num) {
+    console.log('calling getEthTransactions with num: ', num)
+    const result = await etherscan.schedule(async () => {
+        await fetch(`https://api.etherscan.io/api` +
+            `?module=account` +
+            `&action=txlist` +
+            `&address=${address}` +
+            `&startblock=0` +
+            `&endblock=99999999` +
+            `&page=${num}` +
+            `&offset=100` +
+            `&sort=asc` +
+            `&apikey=${etherscanApiKey}`)
+            .then(res => res.json())
+            .then(async data => {
+                for (let i = 0; i < data.result.length; i++) {
+                    let txInfo = await parseTxInfo(data.result[i], 'ethereum txs')
+                    // await finalInfo.writeRecords([txInfo])
+                }
+            })
+    })
 }
 
 
@@ -239,4 +293,28 @@ let exampleTx2 = {
     batchId: 2621971
 }
 
-// console.log(await parseZkSyncTxInfo(exampleTx2))
+let exampleEthTx = {
+    blockNumber: '14700748',
+    timeStamp: '1651528156',
+    hash: '0xf4f20977ca9b5029ca63e4ea05060474c30f9a3cf9149a319e5a171576862548',
+    nonce: '21',
+    blockHash: '0x5e021a3e3780d7e32c37f46a9ce5f954432d0439753506109341dc961b11a0f8',
+    transactionIndex: '208',
+    from: '0x6e8e73631369cea39cdbda187b24dd2f2f8e90bb',
+    to: '0x9b67d3067fa606be28e56c1ab184725c07b7b221',
+    value: '18000000000000000',
+    gas: '21000',
+    gasPrice: '84194059583',
+    isError: '0',
+    txreceipt_status: '1',
+    input: '0x',
+    contractAddress: '',
+    cumulativeGasUsed: '23247082',
+    gasUsed: '21000',
+    confirmations: '1976612',
+    methodId: '0x',
+    functionName: ''
+}
+
+
+// console.log(await parseTxInfo(exampleEthTx, 'ethereum txs'))
