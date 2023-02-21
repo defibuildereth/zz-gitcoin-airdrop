@@ -135,8 +135,7 @@ async function getZkTokenInfo(int) {
     } else {
         let decimals, symbol;
         console.log('calling api', int)
-        const result = await zkscan.schedule(async () => {
-            await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
+        await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
             .then(res => res.json())
             .then(data => {
                 symbol = data.result.symbol
@@ -147,7 +146,6 @@ async function getZkTokenInfo(int) {
                 tokens[int] = info
             })
         return { symbol: symbol, decimals: decimals }
-        })
     }
 }
 
