@@ -170,46 +170,27 @@ async function parseTxInfo(tx, networkSymbol) {
         } else {
             console.log('outgoing/ non-finalized')
         }
-    } else if (networkSymbol == 'ethereum txs') {
+    }
+    else if (networkSymbol.slice(0, 8) === 'ethereum') {
         if (tx.to === donationAddress) {
-            // console.log('parsing info: ', tx)
             let timestamp = Number(tx.timeStamp) * 1000
             let fromAddress = tx.from
-            let token = 'ETH'
-            let tokenAmount = Number(tx.value * 10 ** -18).toFixed(4)
+            let tokenAmount, price, token;
             let coingeckoDate = timestampToDate(Number(timestamp))
-            let price = await findPrice('ethereum', coingeckoDate)
-            if (price) {
-                let usdValue = price * tokenAmount;
-                let network = 'ethereum'
-                let txHash = tx.hash
-                return {
-                    timestamp: timestamp,
-                    from: fromAddress,
-                    token: token,
-                    tokenAmount: tokenAmount,
-                    usdValue: usdValue,
-                    network: network,
-                    txHash: txHash,
+            if (networkSymbol === 'ethereum txs') {
+                token = 'ETH'
+                tokenAmount = Number(tx.value * 10 ** -18).toFixed(4)
+                coingeckoDate = timestampToDate(Number(timestamp))
+                price = await findPrice('ethereum', coingeckoDate)
+            } else if (networkSymbol == 'ethereum tokens') {
+                token = tx.tokenSymbol
+                tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(4)
+                if (stables.includes(token.toLowerCase())) {
+                    price = 1
+                } else {
+                    let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
+                    price = await findPrice(coingeckoSymbol, coingeckoDate)
                 }
-            }
-        } else {
-            console.log('not an incoming')
-        }
-    } else if (networkSymbol == 'ethereum tokens') {
-        if (tx.to === donationAddress) {
-            console.log('parsing info: ', tx)
-            let timestamp = Number(tx.timeStamp) * 1000
-            let fromAddress = tx.from
-            let token = tx.tokenSymbol
-            let tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(4)
-            let price;
-            if (stables.includes(token.toLowerCase())) {
-                price = 1
-            } else {
-                let coingeckoDate = timestampToDate(Number(timestamp))
-                let coingeckoSymbol = getCoingeckoSymbol(token.symbol.toLowerCase());
-                price = await findPrice(coingeckoSymbol, coingeckoDate) //store locally
             }
             if (price) {
                 let usdValue = price * tokenAmount;
@@ -225,12 +206,8 @@ async function parseTxInfo(tx, networkSymbol) {
                     txHash: txHash,
                 }
             }
-
-        } else {
-            console.log('not an incoming')
         }
     }
-
 }
 
 function timestampToDate(timestamp) {
@@ -309,7 +286,7 @@ const findPrice = async function (tokenId, date) {
 
 // getZkTransactions(donationAddress, 'latest', 0, 0)
 // getEthTransactions(donationAddress, 1)
-getEthTokens(donationAddress)
+// getEthTokens(donationAddress)
 
 let exampleTx = {
     txHash: '0xf98789db93c7ab0e124ed906ff4bbbd718ca7b5a87208df0972eb0bd2e69b50e',
@@ -409,4 +386,5 @@ let exampleEthTokens = {
 }
 
 
-// console.log(await parseTxInfo(exampleEthTokens, 'ethereum tokens'))
+console.log(await parseTxInfo(exampleEthTokens, 'ethereum tokens'))
+console.log(await parseTxInfo(exampleEthTx, 'ethereum txs'))
