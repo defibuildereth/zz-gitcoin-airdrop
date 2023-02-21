@@ -27,6 +27,7 @@ const coingecko = new Map();
 coingecko.set('wbtc', 'wrapped-bitcoin');
 coingecko.set('eth', 'ethereum');
 coingecko.set('weth', 'ethereum')
+coingecko.set('rai', 'rai')
 
 let polygonscanApiKey = process.env.POLYGONSCAN;
 let etherscanApiKey = process.env.ETHERSCAN;
@@ -150,7 +151,7 @@ const getMaticTokens = async function (address, num) {
         )
             .then(res => res.json())
             .then(async data => {
-                console.log(data.result.length)
+                // console.log(data.result.length)
                 for (let i = 0; i < data.result.length; i++) {
                     let txInfo = await parseTxInfo(data.result[i], 'polygon tokens')
                     if (txInfo) {
@@ -178,9 +179,8 @@ const getEthTokens = async function (address) {
         )
             .then(res => res.json())
             .then(async data => {
-                console.log(data.result.length)
+                // console.log(data.result.length)
                 for (let i = 0; i < data.result.length; i++) {
-                    console.log(data.result[i])
                     let txInfo = await parseTxInfo(data.result[i], 'ethereum tokens')
                     if (txInfo) {
                         await finalInfo.writeRecords([txInfo])
@@ -191,7 +191,6 @@ const getEthTokens = async function (address) {
 }
 
 async function parseTxInfo(tx, networkSymbol) {
-    console.log(tx)
     if (networkSymbol == 'zksync') {
         if (tx.op.to === donationAddress && tx.status === 'finalized') {
             // console.log(tx)
@@ -338,19 +337,22 @@ async function getZkTokenInfo(int) {
     if (tokens[int]) {
         return tokens[int]
     } else {
-        let decimals, symbol;
-        console.log('calling api', int)
-        await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
-            .then(res => res.json())
-            .then(data => {
-                symbol = data.result.symbol
-                decimals = data.result.decimals
-                return { symbol: symbol, decimals: decimals, coingecko: coingecko }
-            })
-            .then(info => {
-                tokens[int] = info
-            })
-        return { symbol: symbol, decimals: decimals }
+        if (int) {
+            let decimals, symbol;
+            console.log('calling api', int)
+            await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
+                .then(res => res.json())
+                .then(data => {
+                    symbol = data.result.symbol
+                    decimals = data.result.decimals
+                    return { symbol: symbol, decimals: decimals, coingecko: coingecko }
+                })
+                .then(info => {
+                    tokens[int] = info
+                })
+            return { symbol: symbol, decimals: decimals }
+        }
+
     }
 }
 
