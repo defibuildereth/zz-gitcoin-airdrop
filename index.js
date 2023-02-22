@@ -22,7 +22,8 @@ dotenv.config();
 
 const tokensFile = 'token-api-results.json';
 const pricesFile = 'prices-api-results.json';
-const addressesFile = 'bulk-gitcoin-addresses.json';
+const addressesFileEth = 'bulk-gitcoin-addresses.json';
+const addressesFileMatic = 'bulk-gitcoin-addresses-matic.json'
 let stables = ['usdc', 'usdt', 'dai']
 
 const coingecko = new Map();
@@ -227,6 +228,35 @@ const getEthInternal = async function (address) {
     })
 }
 
+const getMaticInternal = async function (address) {
+    console.log('calling getMaticInternal')
+    const result = await polygonscan.schedule(async () => {
+        await fetch(
+            `https://api.polygonscan.com/api` +
+            `?module=account` +
+            `&action=txlistinternal` +
+            `&address=${address}` +
+            `&startblock=0` +
+            `&endblock=99999999` +
+            `&page=1` +
+            `&offset=1000` +
+            `&sort=asc` +
+            `&apikey=${polygonscanApiKey}`
+        )
+            .then(res => res.json())
+            .then(async data => {
+                console.log(data.result.length)
+                for (let i = 0; i < data.result.length; i++) {
+                    // let from = findFromAddressMatic(data.result[i])
+                    let txInfo = await parseTxInfo(data.result[i], 'polygon internal')
+                    if (txInfo) {
+                        await finalInfo.writeRecords([txInfo])
+                    }
+                }
+            })
+    })
+}
+
 async function parseTxInfo(tx, networkSymbol) {
     if (networkSymbol === 'zksync') {
         if (tx.op.to === donationAddress && tx.status === 'finalized') {
@@ -288,7 +318,7 @@ async function parseTxInfo(tx, networkSymbol) {
                     price = await findPrice(coingeckoSymbol, coingeckoDate)
                 }
             } else if (networkSymbol == 'ethereum internal') {
-                fromAddress = await findFromAddress(tx)
+                fromAddress = await findFromAddressEth(tx)
                 token = 'ETH'
                 tokenAmount = Number(tx.value * 10 ** -18).toFixed(6)
                 coingeckoDate = timestampToDate(Number(timestamp))
@@ -315,23 +345,30 @@ async function parseTxInfo(tx, networkSymbol) {
     else if (networkSymbol.slice(0, 7) === 'polygon') {
         if (tx.to === donationAddress && tx.from !== donationAddress) {
             let timestamp = Number(tx.timeStamp) * 1000
-            let fromAddress = tx.from
-            let tokenAmount, price, token;
-            let coingeckoDate = timestampToDate(Number(timestamp))
+            let tokenAmount, price, token, fromAddress, coingeckoDate;
             if (networkSymbol === 'polygon txs') {
+                fromAddress = tx.from
                 token = 'MATIC'
                 tokenAmount = Number(tx.value * 10 ** -18).toFixed(6)
                 coingeckoDate = timestampToDate(Number(timestamp))
                 price = await findPrice('matic-network', coingeckoDate)
             } else if (networkSymbol == 'polygon tokens') {
+                fromAddress = tx.from
                 token = tx.tokenSymbol
                 tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(6)
+                coingeckoDate = timestampToDate(Number(timestamp))
                 if (stables.includes(token.toLowerCase())) {
                     price = 1
                 } else {
                     let coingeckoSymbol = getCoingeckoSymbol(token.toLowerCase());
                     price = await findPrice(coingeckoSymbol, coingeckoDate)
                 }
+            } else if (networkSymbol == 'polygon internal') {
+                fromAddress = await findFromAddressMatic(tx)
+                token = 'MATIC'
+                tokenAmount = Number(tx.value * 10 ** -18).toFixed(6)
+                coingeckoDate = timestampToDate(Number(timestamp))
+                price = await findPrice('matic-network', coingeckoDate)
             }
             if (price) {
                 let usdValue = (price * tokenAmount).toFixed(6);
@@ -356,10 +393,43 @@ async function parseTxInfo(tx, networkSymbol) {
     }
 }
 
-async function findFromAddress(tx) {
+async function findFromAddressMatic(tx) {
     let key = tx.hash;
-    if (fs.existsSync(addressesFile)) {
-        const data = fs.readFileSync(addressesFile)
+    if (fs.existsSync(addressesFileMatic)) {
+        const data = fs.readFileSync(addressesFileMatic)
+        const jsonData = JSON.parse(data)
+        if (jsonData[key]) {
+            return jsonData[key]
+        }
+    }
+    let address;
+    const result = await polygonscan.schedule(async () => {
+        await fetch(
+            `https://api.polygonscan.com/api` +
+            `?module=account` +
+            `&action=txlist` +
+            `&address=${tx.from}` +
+            `&startblock=${tx.blockNumber}` +
+            `&endblock=${tx.blockNumber}` +
+            `&page=1` +
+            `&offset=10` +
+            `&sort=asc` +
+            `&apikey=${polygonscanApiKey}`
+        )
+            .then(res => res.json())
+            .then(async data => {
+                address = data.result[0].from
+                const jsonData = { ...JSON.parse(fs.readFileSync(addressesFileMatic)), [key]: address };
+                fs.writeFileSync(addressesFileMatic, JSON.stringify(jsonData));
+                return address
+            })
+    })
+}
+
+async function findFromAddressEth(tx) {
+    let key = tx.hash;
+    if (fs.existsSync(addressesFileEth)) {
+        const data = fs.readFileSync(addressesFileEth)
         const jsonData = JSON.parse(data)
         if (jsonData[key]) {
             return jsonData[key]
@@ -382,8 +452,8 @@ async function findFromAddress(tx) {
             .then(res => res.json())
             .then(async data => {
                 address = data.result[0].from
-                const jsonData = { ...JSON.parse(fs.readFileSync(addressesFile)), [key]: address };
-                fs.writeFileSync(addressesFile, JSON.stringify(jsonData));
+                const jsonData = { ...JSON.parse(fs.readFileSync(addressesFileEth)), [key]: address };
+                fs.writeFileSync(addressesFileEth, JSON.stringify(jsonData));
                 return address
             })
     })
@@ -453,7 +523,7 @@ const findPrice = async function (tokenId, date) {
             return jsonData[key]
         }
     }
-    let result, price;
+    let price;
     const call = await coingeckoApi.schedule(async () => {
         console.log('API call: ', key)
         await fetch(`https://api.coingecko.com/api/v3/coins/${tokenId}/history?date=${date}`)
@@ -461,8 +531,7 @@ const findPrice = async function (tokenId, date) {
             .then(res => {
                 if (res.market_data) {
                     price = res.market_data.current_price.usd
-                    result = price
-                    const jsonData = { ...JSON.parse(fs.readFileSync(pricesFile)), [key]: result };
+                    const jsonData = { ...JSON.parse(fs.readFileSync(pricesFile)), [key]: price };
                     fs.writeFileSync(pricesFile, JSON.stringify(jsonData));
                 }
             })
@@ -471,12 +540,13 @@ const findPrice = async function (tokenId, date) {
     return price
 }
 
-// getZkTransactions(donationAddress, 'latest', 0, 0)
-// getEthTransactions(donationAddress, 1)
-// getEthTokens(donationAddress)
-// getMaticTransactions(donationAddress, 1)
-// getMaticTokens(donationAddress, 1)
+getZkTransactions(donationAddress, 'latest', 0, 0)
+getEthTransactions(donationAddress, 1)
+getEthTokens(donationAddress)
+getMaticTransactions(donationAddress, 1)
+getMaticTokens(donationAddress, 1)
 getEthInternal(donationAddress)
+getMaticInternal(donationAddress)
 
 let exampleInternalEth = {
     "blockNumber": "13799426",
