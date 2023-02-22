@@ -20,10 +20,9 @@ const finalInfo = createObjectCsvWriter({
 
 dotenv.config();
 
-let tokens = [];
 const tokensFile = 'token-api-results.json';
 const pricesFile = 'prices-api-results.json';
-let prices = [];
+const addressesFile = 'bulk-gitcoin-addresses.json';
 let stables = ['usdc', 'usdt', 'dai']
 
 const coingecko = new Map();
@@ -33,7 +32,7 @@ coingecko.set('weth', 'ethereum')
 coingecko.set('rai', 'rai')
 coingecko.set('uni', 'uniswap')
 coingecko.set('storj', 'storj')
-coingecko.set('link','chainlink')
+coingecko.set('link', 'chainlink')
 coingecko.set('mkr', 'maker')
 coingecko.set('mana', 'decentraland')
 
@@ -61,6 +60,7 @@ const coingeckoApi = new Bottleneck({
 });
 
 let donationAddress = '0x9b67d3067fa606be28e56c1ab184725c07b7b221';
+let gitcoinAddress = '0x7d655c57f71464b6f83811c55d84009cd9f5221c';
 
 const getZkTransactions = async function (address, tx, index) {
 
@@ -198,8 +198,37 @@ const getEthTokens = async function (address) {
     })
 }
 
+const getEthInternal = async function (address) {
+    console.log('calling getEthInternal')
+    const result = await etherscan.schedule(async () => {
+        await fetch(
+            `https://api.etherscan.io/api` +
+            `?module=account` +
+            `&action=txlistinternal` +
+            `&address=${address}` +
+            `&startblock=0` +
+            `&endblock=99999999` +
+            `&page=1` +
+            `&offset=1000` +
+            `&sort=asc` +
+            `&apikey=${etherscanApiKey}`
+        )
+            .then(res => res.json())
+            .then(async data => {
+                console.log(data.result.length)
+                for (let i = 0; i < data.result.length; i++) {
+                    let txInfo = await parseTxInfo(data.result[i], 'ethereum internal')
+                    // console.log(txInfo)
+                    if (txInfo) {
+                        await finalInfo.writeRecords([txInfo])
+                    }
+                }
+            })
+    })
+}
+
 async function parseTxInfo(tx, networkSymbol) {
-    if (networkSymbol == 'zksync') {
+    if (networkSymbol === 'zksync') {
         if (tx.op.to === donationAddress && tx.status === 'finalized') {
             // console.log(tx)
             let txHash = tx.txHash;
@@ -241,15 +270,15 @@ async function parseTxInfo(tx, networkSymbol) {
     else if (networkSymbol.slice(0, 8) === 'ethereum') {
         if (tx.to === donationAddress && tx.from !== donationAddress) {
             let timestamp = Number(tx.timeStamp) * 1000
-            let fromAddress = tx.from
-            let tokenAmount, price, token;
-            let coingeckoDate = timestampToDate(Number(timestamp))
+            let tokenAmount, price, token, fromAddress, coingeckoDate;
             if (networkSymbol === 'ethereum txs') {
+                fromAddress = tx.from
                 token = 'ETH'
                 tokenAmount = Number(tx.value * 10 ** -18).toFixed(6)
                 coingeckoDate = timestampToDate(Number(timestamp))
                 price = await findPrice('ethereum', coingeckoDate)
             } else if (networkSymbol == 'ethereum tokens') {
+                fromAddress = tx.from
                 token = tx.tokenSymbol
                 tokenAmount = Number(tx.value * 10 ** -tx.tokenDecimal).toFixed(6)
                 if (stables.includes(token.toLowerCase())) {
@@ -258,6 +287,12 @@ async function parseTxInfo(tx, networkSymbol) {
                     let coingeckoSymbol = getCoingeckoSymbol(token.toLowerCase());
                     price = await findPrice(coingeckoSymbol, coingeckoDate)
                 }
+            } else if (networkSymbol == 'ethereum internal') {
+                fromAddress = await findFromAddress(tx)
+                token = 'ETH'
+                tokenAmount = Number(tx.value * 10 ** -18).toFixed(6)
+                coingeckoDate = timestampToDate(Number(timestamp))
+                price = await findPrice('ethereum', coingeckoDate)
             }
             if (price) {
                 let usdValue = (price * tokenAmount).toFixed(6);
@@ -278,7 +313,7 @@ async function parseTxInfo(tx, networkSymbol) {
         }
     }
     else if (networkSymbol.slice(0, 7) === 'polygon') {
-        if (tx.to === donationAddress  && tx.from !== donationAddress) {
+        if (tx.to === donationAddress && tx.from !== donationAddress) {
             let timestamp = Number(tx.timeStamp) * 1000
             let fromAddress = tx.from
             let tokenAmount, price, token;
@@ -315,9 +350,43 @@ async function parseTxInfo(tx, networkSymbol) {
                 console.log('error getting price', tx)
             }
         }
-    } else {
+    }
+    else {
         console.log(`network symbol not recognised: ${networkSymbol}`)
     }
+}
+
+async function findFromAddress(tx) {
+    let key = tx.hash;
+    if (fs.existsSync(addressesFile)) {
+        const data = fs.readFileSync(addressesFile)
+        const jsonData = JSON.parse(data)
+        if (jsonData[key]) {
+            return jsonData[key]
+        }
+    }
+    let address;
+    const result = await etherscan.schedule(async () => {
+        await fetch(
+            `https://api.etherscan.io/api` +
+            `?module=account` +
+            `&action=txlist` +
+            `&address=${tx.from}` +
+            `&startblock=${tx.blockNumber}` +
+            `&endblock=${tx.blockNumber}` +
+            `&page=1` +
+            `&offset=10` +
+            `&sort=asc` +
+            `&apikey=${etherscanApiKey}`
+        )
+            .then(res => res.json())
+            .then(async data => {
+                address = data.result[0].from
+                const jsonData = { ...JSON.parse(fs.readFileSync(addressesFile)), [key]: address };
+                fs.writeFileSync(addressesFile, JSON.stringify(jsonData));
+                return address
+            })
+    })
 }
 
 function timestampToDate(timestamp) {
@@ -384,7 +453,6 @@ const findPrice = async function (tokenId, date) {
             return jsonData[key]
         }
     }
-    // If result not found in file, make API call
     let result, price;
     const call = await coingeckoApi.schedule(async () => {
         console.log('API call: ', key)
@@ -403,8 +471,28 @@ const findPrice = async function (tokenId, date) {
     return price
 }
 
-getZkTransactions(donationAddress, 'latest', 0, 0)
-getEthTransactions(donationAddress, 1)
-getEthTokens(donationAddress)
-getMaticTransactions(donationAddress, 1)
-getMaticTokens(donationAddress, 1)
+// getZkTransactions(donationAddress, 'latest', 0, 0)
+// getEthTransactions(donationAddress, 1)
+// getEthTokens(donationAddress)
+// getMaticTransactions(donationAddress, 1)
+// getMaticTokens(donationAddress, 1)
+getEthInternal(donationAddress)
+
+let exampleInternalEth = {
+    "blockNumber": "13799426",
+    "timeStamp": "1639432593",
+    "hash": "0x9b90bdb777ae1418b8557a75a6baa986bc7e2f92f0f750446c0f480ecff60db9",
+    "from": "0x7d655c57f71464b6f83811c55d84009cd9f5221c",
+    "to": "0x9b67d3067fa606be28e56c1ab184725c07b7b221",
+    "value": "27000000000000000",
+    "contractAddress": "",
+    "input": "",
+    "type": "call",
+    "gas": "70928",
+    "gasUsed": "0",
+    "traceId": "0",
+    "isError": "0",
+    "errCode": ""
+}
+
+// console.log(await parseTxInfo(exampleInternalEth, 'ethereum internal'))
