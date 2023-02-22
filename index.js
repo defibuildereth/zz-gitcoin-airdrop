@@ -31,6 +31,11 @@ coingecko.set('wbtc', 'wrapped-bitcoin');
 coingecko.set('eth', 'ethereum');
 coingecko.set('weth', 'ethereum')
 coingecko.set('rai', 'rai')
+coingecko.set('uni', 'uniswap')
+coingecko.set('storj', 'storj')
+coingecko.set('link','chainlink')
+coingecko.set('mkr', 'maker')
+coingecko.set('mana', 'decentraland')
 
 let polygonscanApiKey = process.env.POLYGONSCAN;
 let etherscanApiKey = process.env.ETHERSCAN;
@@ -234,7 +239,7 @@ async function parseTxInfo(tx, networkSymbol) {
         }
     }
     else if (networkSymbol.slice(0, 8) === 'ethereum') {
-        if (tx.to === donationAddress) {
+        if (tx.to === donationAddress && tx.from !== donationAddress) {
             let timestamp = Number(tx.timeStamp) * 1000
             let fromAddress = tx.from
             let tokenAmount, price, token;
@@ -273,7 +278,7 @@ async function parseTxInfo(tx, networkSymbol) {
         }
     }
     else if (networkSymbol.slice(0, 7) === 'polygon') {
-        if (tx.to === donationAddress) {
+        if (tx.to === donationAddress  && tx.from !== donationAddress) {
             let timestamp = Number(tx.timeStamp) * 1000
             let fromAddress = tx.from
             let tokenAmount, price, token;
@@ -345,18 +350,14 @@ async function getZkTokenInfo(int) {
     // Check if file exists and contains result for this int value
     if (fs.existsSync(tokensFile)) {
         const data = fs.readFileSync(tokensFile);
-        console.log(data)
         const jsonData = JSON.parse(data);
-        console.log('file data: ', jsonData)
-
         if (jsonData[int]) {
-            console.log('Result retrieved from file:', jsonData[int]);
             return jsonData[int];
         }
     }
 
     // If result not found in file, make API call
-    console.log('API call for int:', int);
+    console.log('API call for int: ', int);
     await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
         .then(res => res.json())
         .then(data => {
@@ -373,57 +374,65 @@ async function getZkTokenInfo(int) {
     return result;
 }
 
-// async function getZkTokenInfo(int) {
-//     if (tokens[int]) {
-//         return tokens[int]
-//     } else {
-//         let decimals, symbol;
-//         console.log('calling api', int)
-//         await fetch(`https://api.zksync.io/api/v0.2/tokens/${int}`)
-//             .then(res => res.json())
-//             .then(data => {
-//                 if (data.result) {
-//                     symbol = data.result.symbol
-//                     decimals = data.result.decimals
-//                     return { symbol: symbol, decimals: decimals }
-//                 }
-//             })
-//             .then(info => {
-//                 tokens[int] = info
-//             })
-//         return { symbol: symbol, decimals: decimals }
-//     }
-// }
-
 const findPrice = async function (tokenId, date) {
-    if (stables.includes(tokenId)) {
-        return 1
-    }
-    if (prices[tokenId + '-' + date]) {
-        return prices[tokenId + '-' + date]
-    } else {
-        let price;
-        const result = await coingeckoApi.schedule(async () => {
-            console.log('calling api', tokenId, date)
-            await fetch(`https://api.coingecko.com/api/v3/coins/${tokenId}/history?date=${date}`)
-                .then(r => r.json())
-                .then(res => {
-                    if (res.market_data) {
-                        price = (res.market_data.current_price.usd)
-                    }
-                    else {
-                        console.log('problem getting price, ', res)
-                    }
-                })
-        })
-        if (price) {
-            prices[tokenId + '-' + date] = price
-            return price
-        } else {
-            console.log('error getting coingecko price: ', tokenId, date)
+    let key = tokenId + '-' + date
+
+    if (fs.existsSync(pricesFile)) {
+        const data = fs.readFileSync(pricesFile)
+        const jsonData = JSON.parse(data)
+        if (jsonData[key]) {
+            return jsonData[key]
         }
     }
+    // If result not found in file, make API call
+    let result, price;
+    const call = await coingeckoApi.schedule(async () => {
+        console.log('API call: ', key)
+        await fetch(`https://api.coingecko.com/api/v3/coins/${tokenId}/history?date=${date}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.market_data) {
+                    price = res.market_data.current_price.usd
+                    result = price
+                    const jsonData = { ...JSON.parse(fs.readFileSync(pricesFile)), [key]: result };
+                    fs.writeFileSync(pricesFile, JSON.stringify(jsonData));
+                }
+            })
+            .catch(err => console.error(err));
+    })
+    return price
+
 }
+
+// const findPrice = async function (tokenId, date) {
+//     if (stables.includes(tokenId)) {
+//         return 1
+//     }
+//     if (prices[tokenId + '-' + date]) {
+//         return prices[tokenId + '-' + date]
+//     } else {
+//         let price;
+//         const result = await coingeckoApi.schedule(async () => {
+//             console.log('calling api', tokenId, date)
+//             await fetch(`https://api.coingecko.com/api/v3/coins/${tokenId}/history?date=${date}`)
+//                 .then(r => r.json())
+//                 .then(res => {
+//                     if (res.market_data) {
+//                         price = (res.market_data.current_price.usd)
+//                     }
+//                     else {
+//                         console.log('problem getting price, ', res)
+//                     }
+//                 })
+//         })
+//         if (price) {
+//             prices[tokenId + '-' + date] = price
+//             return price
+//         } else {
+//             console.log('error getting coingecko price: ', tokenId, date)
+//         }
+//     }
+// }
 
 getZkTransactions(donationAddress, 'latest', 0, 0)
 getEthTransactions(donationAddress, 1)
